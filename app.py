@@ -1,10 +1,21 @@
 import re
+import os
+import tempfile
 import base64
 import streamlit as st
 from ollama import chat
 
 # Set Streamlit page configuration (optional)
 st.set_page_config(page_title="Ollama Streaming Chat")
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []  # Chat history
+
+if "pdf_tool" not in st.session_state:
+    st.session_state.pdf_tool = None  # Store the DocumentSearchTool
+
+if "crew" not in st.session_state:
+    st.session_state.crew = None
 
 
 def format_reasoning_response(thinking_content):
@@ -46,6 +57,26 @@ def display_chat_history():
     for message in st.session_state["messages"]:
         if message["role"] != "system":  # Skip system messages
             display_message(message)
+
+
+def reset_chat():
+    st.session_state.messages = []
+
+
+def display_pdf(file_bytes: bytes, file_name: str):
+    """Displays the uploaded PDF in an iframe."""
+    base64_pdf = base64.b64encode(file_bytes).decode("utf-8")
+    pdf_display = f"""
+    <iframe 
+        src="data:application/pdf;base64,{base64_pdf}" 
+        width="100%" 
+        height="600px" 
+        type="application/pdf"
+    >
+    </iframe>
+    """
+    st.markdown(f"### Preview of {file_name}")
+    st.markdown(pdf_display, unsafe_allow_html=True)
 
 
 def process_thinking_phase(stream):
@@ -111,6 +142,32 @@ def handle_user_input():
             st.session_state["messages"].append(
                 {"role": "assistant", "content": thinking_content + response_content}
             )
+
+
+with st.sidebar:
+    st.header("Add Your PDF Document")
+    uploaded_file = st.file_uploader("Choose a PDF file", type=["pdf"])
+
+    if uploaded_file is not None:
+        # If there's a new file and we haven't set pdf_tool yet...
+        if st.session_state.pdf_tool is None:
+            with tempfile.TemporaryDirectory() as temp_dir:
+                temp_file_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(temp_file_path, "wb") as f:
+                    f.write(uploaded_file.getvalue())
+
+                with st.spinner("Indexing PDF... Please wait..."):
+                    pass
+                    # st.session_state.pdf_tool = DocumentSearchTool(
+                    #     file_path=temp_file_path
+                    # )
+
+            st.success("PDF indexed! Ready to chat.")
+
+        # Optionally display the PDF in the sidebar
+        display_pdf(uploaded_file.getvalue(), uploaded_file.name)
+
+    st.button("Clear Chat", on_click=reset_chat)
 
 
 def main():

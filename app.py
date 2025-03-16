@@ -5,14 +5,14 @@ import streamlit as st
 from langchain.chains import RetrievalQA
 from langchain_ollama import ChatOllama
 from langchain_ollama import OllamaEmbeddings
-from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 # Page configuration
 st.set_page_config(
     page_icon="💬",
-    page_title="Deepseek RAG",
+    page_title="Langchain RAG",
 )
 
 # Initialize session state
@@ -23,40 +23,46 @@ if "pdf_tool" not in st.session_state:
 
 
 def setup(file_path):
-    """Set up the RAG pipeline with the uploaded PDF."""
+    # Load and split PDF
     loader = PyPDFLoader(file_path)
     docs = loader.load_and_split()
 
+    # Text splitting configuration
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1200,
-        chunk_overlap=100,
+        chunk_size=1000,
+        chunk_overlap=50,
     )
     chunks = text_splitter.split_documents(docs)
 
-    embeddings = OllamaEmbeddings(model="nomic-embed-text")
-    vector_store = InMemoryVectorStore(embeddings)
-    vector_store.add_documents(chunks)
+    try:
+        vector_store = Chroma.from_documents(
+            chunks, OllamaEmbeddings(model="nomic-embed-text")
+        )
+    except Exception as e:
+        st.error(f"Error creating vector store: {str(e)}")
+        return None
+    retriever = vector_store.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": 4},  # Return top 4 most relevant chunks
+    )
 
-    retriever = vector_store.as_retriever(search_type="mmr", search_kwargs={"k": 3})
-
-    llm = ChatOllama(
-        temperature=0.6, model="deepseek-r1", streaming=True
-    )  # Enable streaming
+    llm = ChatOllama(model="gemma3")
 
     qa_chain = RetrievalQA.from_chain_type(
-        llm=llm, retriever=retriever, chain_type="stuff"
+        llm=llm,
+        retriever=retriever,
+        chain_type="map_reduce",
+        return_source_documents=True,
     )
 
     return qa_chain
 
 
 def reset_chat():
-    """Reset the chat history."""
     st.session_state.messages = []
 
 
 def display_pdf(file_bytes: bytes, file_name: str):
-    """Display the uploaded PDF in an iframe."""
     base64_pdf = base64.b64encode(file_bytes).decode("utf-8")
     pdf_display = f"""
     <iframe 
@@ -71,7 +77,6 @@ def display_pdf(file_bytes: bytes, file_name: str):
 
 
 def display_sidebar():
-    """Display the sidebar for uploading PDFs and clearing the chat."""
     with st.sidebar:
         st.header("Add Your PDF Document")
         uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
@@ -88,17 +93,15 @@ def display_sidebar():
                 st.success("PDF indexed! Ready to chat.")
             display_pdf(uploaded_file.getvalue(), uploaded_file.name)
 
-        st.button("Clear Chat", on_click=reset_chat)
-
 
 def main():
-    """Main function to run the Streamlit app."""
     st.markdown(
         f"""
-    # RAG powered by <img src="data:image/png;base64,{base64.b64encode(open("assets/deep-seek.png", "rb").read()).decode()}" width="140" style="vertical-align: -3px;">
+    # RAG orchestrated with <img src="data:image/png;base64,{base64.b64encode(open("assets/langchain.png", "rb").read()).decode()}" width="140" style="vertical-align: -3px;">
     """,
         unsafe_allow_html=True,
     )
+    st.button("Clear Chat", on_click=reset_chat)
 
     display_sidebar()
 
@@ -120,9 +123,9 @@ def main():
 
             try:
                 # Get the response from the QA chain
-                response = qa_chain.invoke({"query": prompt})
-                result_text = response["result"]
-                st.write_stream(lambda: (chunk for chunk in result_text))
+                with st.spinner("Thinking"):
+                    response = qa_chain.invoke({"query": prompt})
+                    st.markdown(response["result"])
             except Exception as e:
                 st.error(f"Error: {str(e)}")
 

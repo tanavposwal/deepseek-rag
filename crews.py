@@ -1,9 +1,8 @@
-from crewai import Agent, Task, LLM, Crew, Process
-
-llm = LLM(model="ollama/gemma3", base_url="http://localhost:11434")
+from crewai import Agent, Task, Crew, Process, LLM
 
 
 def init_crew(tool):
+    llm = LLM(model="ollama/gemma3", base_url="http://localhost:11434")
     researcher = Agent(
         role="Research Agent",
         goal="Search through the PDF to find relevant answers",
@@ -16,6 +15,7 @@ def init_crew(tool):
             """
         ),
         tools=[tool],
+        llm=llm,
     )
 
     writer = Agent(
@@ -29,15 +29,13 @@ def init_crew(tool):
             clear and concise emails based on the provided information.
             """
         ),
+        llm=llm,
     )
 
     task = Task(
         description=(
             """
-            Answer the customer's questions based on the home inspection PDF.
-            The research agent will search through the PDF to find the relevant answers.
-            Your final answer MUST be clear and accurate, based on the content of the home
-            inspection PDF.
+            Answer the customer's questions based on the PDF.
 
             Here is the customer's question:
             {input}
@@ -45,7 +43,7 @@ def init_crew(tool):
         ),
         expected_output="""
             Provide clear and accurate answers to the customer's questions based on 
-            the content of the home inspection PDF.
+            the content of the PDF.
             """,
         tools=[tool],
         agent=researcher,
